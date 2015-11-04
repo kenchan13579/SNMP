@@ -9,6 +9,10 @@
     size_t anOID_len;
     netsnmp_variable_list *vars;
     int status;
+    struct interfaces {
+      char ipaddress[20];
+      int ifIndex;
+    };
   /**********************/
 
 // initialize connection to snmp agent
@@ -19,39 +23,38 @@ void init() {
      */
     snmp_sess_init( &session );                   /* set up defaults */
     session.peername = strdup("localhost");
-    session.version = SNMP_VERSION_1;
-    session.community = "secret";
+    session.version = SNMP_VERSION_2c;
+    session.community = "public";
     session.community_len = strlen(session.community);
 
 }
-void snmpget(char* oid) {
-   SOCK_STARTUP;
+void snmpcommand(char* oid,int cmd) {
+  SOCK_STARTUP;
+ 
     ss = snmp_open(&session);                     /* establish the session */
     if (!ss) {
       snmp_sess_perror("ack", &session);
       SOCK_CLEANUP;
       exit(1);
     }
-    printf("%s\n" , oid);
-    pdu = snmp_pdu_create(SNMP_MSG_GET);
+    pdu = snmp_pdu_create(cmd);
+     if ( cmd == SNMP_MSG_GETBULK) {
+    pdu->non_repeaters  = 0;
+    pdu->max_repetitions  = 10; 
+ }
     anOID_len = MAX_OID_LEN;
    get_node(oid, anOID, &anOID_len);
     snmp_add_null_var(pdu, anOID, anOID_len);// all OID should be paired with null for out going req
     status = snmp_synch_response(ss, pdu, &response); // sent req
 }
+void snmpget(char* oid) {
+   snmpcommand(oid,SNMP_MSG_GET);
+}
 void snmpgetnext(char* oid) {
-   SOCK_STARTUP;
-    ss = snmp_open(&session);                     /* establish the session */
-    if (!ss) {
-      snmp_sess_perror("ack", &session);
-      SOCK_CLEANUP;
-      exit(1);
-    }
-    pdu = snmp_pdu_create(SNMP_MSG_GETNEXT);
-    anOID_len = MAX_OID_LEN;
-   get_node(oid, anOID, &anOID_len);
-    snmp_add_null_var(pdu, anOID, anOID_len);// all OID should be paired with null for out going req
-    status = snmp_synch_response(ss, pdu, &response); // sent req
+  snmpcommand(oid,SNMP_MSG_GETNEXT);
+}
+void snmpbulkget(char *oid) {
+  snmpcommand(oid, SNMP_MSG_GETBULK );
 }
 void cleanup()  {
    if (response)
@@ -89,41 +92,59 @@ int getNumOfIfs() {
   return -1;
 }
 void showInteferfaces() {
- int ifNumber = getNumOfIfs();
- printf("%i\n", ifNumber);
-  int done = 0;
+ struct interfaces ifs[10];
  char *prev ="ipAdEntAddr" ;
- printf("<---Interfaces--->\nInterface -> IP Address\n");
- while ( !done ) {
-  snmpgetnext(prev);
-    if ( vars = response->variables)
-    {
-      if ( vars->type == ASN_INTEGER) {
-        done = 1;
-        break;// end of the row
+ int counter = 0 ;
+ snmpbulkget(prev);
+ printf("----Interfaces----\nInterface --> IP Address\n");
+  if (status == STAT_SUCCESS && response->errstat == SNMP_ERR_NOERROR) {
+    // 1st forloop to get the ip address ::ipAdEntAddr
+    for ( vars = response->variables;vars; vars = vars->next_variable) {
+      if ( vars->type == ASN_IPADDRESS) {
+        char *temp = (char*) malloc(50);
+        snprint_ipaddress(temp , 50 , vars,NULL ,NULL,NULL);
+        // Only IP is needed so get rid of the unrelated string
+        int len = strlen("IpAddress: ");
+        int newLen = strlen(temp)-len;
+        strncpy(temp , temp+len, newLen);
+        *(temp+newLen) = '\0';
+        strcpy(ifs[counter++].ipaddress , temp); // add to if struct
+        free(temp);
+        if (counter >= 10 ) {
+          printf("Too many interfaces.\n");
+          vars = vars->next_variable;
+          break;
+        }
+      } else {
+        counter = 0 ; // reset counter to 0
+       // vars = vars->next_variable;
+        break;
       }
-
-      u_char *sp= vars->val.bitstring;
-      char ip[20];
-      sprintf(ip , "%i.%i.%i.%i",sp[0],sp[1],sp[2],sp[3]);
-      prev = ip ;
-      //sp[vars->val_len] = '\0';
-     // prev = sp;
-      cleanup();
-      snmpgetnext("ipAdEntIfIndex");
-      vars = response->variables;
-      long* n = vars->val.integer;
-
-      printf(" %i -> %s" , (int) *n, ip);
-      free(sp);
-    }
- }
+   } // end 1st loop 
+   // 2nd forloop to get the if index IP-MIB::ipAdEntIfIndex
+   for ( vars ;vars; vars = vars->next_variable) {
+      if ( vars->type == ASN_INTEGER) {
+        ifs[counter++].ifIndex = (int) *(vars->val.integer);
+         if (counter >= 10 ) {
+          printf("Too many interfaces.\n");
+          break;
+        }
+      } else {
+        break;
+      }
+   } // end 2nd loop 
+  } else {
+    errHandles(status);
+  }
+ cleanup();
+ // display the table 
+  counter--;
+  while ( counter >= 0 ) {
+    printf("%i  -->  %s\n" , ifs[counter].ifIndex, ifs[counter].ipaddress);
+    counter--;
+  }
 }
 void showNeighbor() {
- /* get_node("ifNumber.0",anOID , &anOID_len);
-  snmp_add_null_var(pdu , anOID , anOID_len);
-  status = snmp_synch_response(ss,pdu,&response);;
-  if ( status == STAT_SUCCESS && response->errstat)*/
 }
 void showTraffic() {
 
