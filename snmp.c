@@ -1,6 +1,8 @@
 #include <net-snmp/net-snmp-config.h>
 #include <net-snmp/net-snmp-includes.h>
 #include <string.h>
+#define true 1
+#define false 0
   /*GLOBAL*/
     netsnmp_session session, *ss;
     netsnmp_pdu *pdu;
@@ -42,6 +44,7 @@ void snmpcommand(char* oid,int cmd) {
     pdu->non_repeaters  = 0;
     pdu->max_repetitions  = 10; 
  }
+ printf("%s\n",oid);
     anOID_len = MAX_OID_LEN;
    get_node(oid, anOID, &anOID_len);
     snmp_add_null_var(pdu, anOID, anOID_len);// all OID should be paired with null for out going req
@@ -93,10 +96,10 @@ int getNumOfIfs() {
 }
 void showInteferfaces() {
  struct interfaces ifs[10];
- char *prev ="ipAdEntAddr" ;
+ char *oid ="ipAdEntAddr" ;
  int counter = 0 ;
- snmpbulkget(prev);
- printf("----Interfaces----\nInterface --> IP Address\n");
+ snmpbulkget(oid);
+ printf("----Interfaces----\nNumber --> IP \n");
   if (status == STAT_SUCCESS && response->errstat == SNMP_ERR_NOERROR) {
     // 1st forloop to get the ip address ::ipAdEntAddr
     for ( vars = response->variables;vars; vars = vars->next_variable) {
@@ -117,7 +120,6 @@ void showInteferfaces() {
         }
       } else {
         counter = 0 ; // reset counter to 0
-       // vars = vars->next_variable;
         break;
       }
    } // end 1st loop 
@@ -143,18 +145,29 @@ void showInteferfaces() {
     printf("%i  -->  %s\n" , ifs[counter].ifIndex, ifs[counter].ipaddress);
     counter--;
   }
+  printf("\n\n");
 }
 void showNeighbor() {
+  int done = false;
+  char *ifIndex_oid = "ipNetToMediaPhysAddress ";
+  char *ip_oid = "ipNetToMediaNetAddress";
+  snmpbulkget(ifIndex_oid);
+  for ( vars = response->variables;vars; vars = vars->next_variable) {
+    
+    print_variable(vars->name, vars->name_length, vars);
+    done = !done;
+  }
+  cleanup();
 }
 void showTraffic() {
-
+  
 }
 int main(int argc, char ** argv)
 {
     int count=1;
     init();
     showInteferfaces();
-
+    showNeighbor();
     /*
      * Clean up:
      *  1) free the response.
