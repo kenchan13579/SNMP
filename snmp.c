@@ -3,7 +3,9 @@
 #include <string.h>
 #define true 1
 #define false 0
-  /*GLOBAL*/
+#define lastInOctets 0
+#define lastOutOctets 1
+  /*GLOBAL VALUES that will be used for SNMP request and response*/
     netsnmp_session session, *ss;
     netsnmp_pdu *pdu;
     netsnmp_pdu *response;
@@ -18,21 +20,21 @@
   /**********************/
 
 // initialize connection to snmp agent
-void init() {
+void init(char* ip , char* community) {
     init_snmp("cs158b");
     /*
      * Initialize a "session" that defines who we're going to talk to
      */
     snmp_sess_init( &session );                   /* set up defaults */
-    session.peername = strdup("localhost");
+    session.peername = strdup(ip); // ip
     session.version = SNMP_VERSION_2c;
-    session.community = "secret";
+    session.community = community; // community
     session.community_len = strlen(session.community);
 
 }
+// a higher abstraction function takes oid string and SNMP methods and call
 void snmpcommand(char* oid,int cmd) {
-  SOCK_STARTUP;
-
+    SOCK_STARTUP;
     ss = snmp_open(&session);                     /* establish the session */
     if (!ss) {
       snmp_sess_perror("ack", &session);
@@ -49,6 +51,7 @@ void snmpcommand(char* oid,int cmd) {
     snmp_add_null_var(pdu, anOID, anOID_len);// all OID should be paired with null for out going req
     status = snmp_synch_response(ss, pdu, &response); // sent req
 }
+
 void snmpget(char* oid) {
    snmpcommand(oid,SNMP_MSG_GET);
 }
@@ -58,6 +61,7 @@ void snmpgetnext(char* oid) {
 void snmpbulkget(char *oid) {
   snmpcommand(oid, SNMP_MSG_GETBULK );
 }
+// Need to clean after each SNMP call, otherwise program fails
 void cleanup()  {
    if (response)
       snmp_free_pdu(response);
@@ -65,6 +69,7 @@ void cleanup()  {
     SOCK_CLEANUP;
 
 }
+// handle err if connection fails
 void errHandles(int stat) {
  if (status == STAT_SUCCESS)
         fprintf(stderr, "Error in packet\nReason: %s\n",
@@ -76,23 +81,7 @@ void errHandles(int stat) {
         snmp_sess_perror("snmpdemoapp", ss);
 
 }
-int getNumOfIfs() {
-  snmpget("ifNumber.0");
- if (status == STAT_SUCCESS && response->errstat == SNMP_ERR_NOERROR) {
-    if (  vars = response->variables) {
-      if ( vars->type == ASN_INTEGER) {
-        long* n = vars->val.integer;
-        cleanup();
-        return (int) *n;
-      }
-    }
-  } else {
-    errHandles(status);
-
-  }
-  cleanup();
-  return -1;
-}
+// helper function to parse OID ipaddress response value
 char* parseIP(char* temp) {
   snprint_ipaddress(temp , 50 , vars ,NULL ,NULL,NULL);
   // Only IP is needed so get rid of the unrelated string
@@ -102,7 +91,10 @@ char* parseIP(char* temp) {
   *(temp+newLen) = '\0';
   return temp;
 }
+struct interfaces monitor;// the interface to monitor
+// Show agents current interface that has an ip
 void showInteferfaces() {
+  int monitor_index = 0; // this records the last interfaces that should be monitored
  struct interfaces ifs[10];
  char *oid ="ipAdEntAddr" ;
  int counter = 0 ;
@@ -115,6 +107,11 @@ void showInteferfaces() {
       if ( vars->type == ASN_IPADDRESS) {
         char tmp[50] ;
         strcpy(ifs[counter++].ipaddress , parseIP(tmp)); // add to if struct
+        int cp = strcmp(tmp , "127.0.0.1");
+        if (cp!=0) {
+          monitor_index = counter;
+          strcpy(monitor.ipaddress , tmp);
+        }
         if (counter >= 10 ) {
           printf("Too many interfaces.\n");
           vars = vars->next_variable;
@@ -129,6 +126,9 @@ void showInteferfaces() {
    for ( vars ;vars; vars = vars->next_variable) {
       if ( vars->type == ASN_INTEGER) {
         ifs[counter++].ifIndex = (int) *(vars->val.integer);
+        if (counter == monitor_index) {
+          monitor.ifIndex = (int) *(vars->val.integer);
+        }
          if (counter >= 10 ) {
           printf("Too many interfaces.\n");
           break;
@@ -150,6 +150,7 @@ void showInteferfaces() {
   printf("------------------------------------------------------------\n");
   printf("\n\n");
 }
+// Show agent's nieghbor and Ips
 void showNeighbor() {
   char ifIndex_oid[50] = "ipNetToMediaIfIndex";
   char ip_oid[50] = "ipNetToMediaNetAddress";
@@ -187,20 +188,69 @@ void showNeighbor() {
   }
   printf("----------------------------------------------------\n\n\n");
 }
-void showTraffic() {
-
+int max(int a , int b) {
+  if ( a > b ) {
+    return a;
+  } else {
+    return b;
+  }
 }
+/**
+ Calculate the current traffic and display the stat based on time interval provided
+**/
+void showTraffic(int timeInterval , int numberOfSamples) {
+  char *monitorIp = monitor.ipaddress;
+  int data[2];
+  char ifInOctets[50] ;
+  char ifOutOctets[50];
+  char ifSpeed[50];
+  sprintf(ifInOctets , "%s.%i","ifInOctets",monitor.ifIndex);
+  sprintf(ifOutOctets , "%s.%i","ifOutOctets",monitor.ifIndex);
+  sprintf(ifSpeed , "%s.%i","ifSpeed",monitor.ifIndex);
+  printf("Monitoring %s ...\n", monitorIp);
+  // initialize the first data "inoctets" and "outoctets"
+  snmpget(ifInOctets);
+  data[lastInOctets] = (int) *(response->variables->val.integer); // last in data
+  cleanup();
+  snmpget(ifOutOctets);
+  data[lastOutOctets] = (int) *(response->variables->val.integer); // last out data
+  cleanup();
+  int totalTime = timeInterval;
+  while ( numberOfSamples >= 0 ) {
+      sleep(timeInterval);
+      snmpget(ifInOctets);
+      int inOctets = (int) *(response->variables->val.integer);
+      cleanup();
+      snmpget(ifOutOctets);
+      int outOctets = (int) *(response->variables->val.integer);
+      cleanup();
+       // bytes per seconds ->  (bytes * 0.000001 per second) -> (Mb per second)
+      long double traffic =  ( max( inOctets-data[lastInOctets] , outOctets-data[lastOutOctets])) * 0.001 / ( timeInterval ); // for kbps
+      printf("At %i second  --> %Lf kbps. ( %.1LF mbps )\n" , totalTime , traffic, traffic*0.001);
+      data[lastInOctets] = inOctets;
+      data[lastOutOctets] = outOctets;
+      totalTime += timeInterval;
+      numberOfSamples--;
+  }
+}
+/*
+Input:
+Time interval , number of sample, ip address, community
+*/
 int main(int argc, char ** argv)
 {
-    int count=1;
-    init();
-    showInteferfaces();
-   showNeighbor();
-    /*
-     * Clean up:
-     *  1) free the response.
-     *  2) close the session.
-     */
+  if ( argc != 5 ) {
+    printf("Please provide Time interval between samples, Number of samples to take, IP address of the agent, and Community\n");
+    return 0;
+  }
+  int timeInterval = atoi(argv[1]);
+  int numberOfSamples = atoi(argv[2]);
+  char* hostname = argv[3];
+  char* community = argv[4];
+  init( hostname, community); //ip , community
+  showInteferfaces();
+  showNeighbor();
+  showTraffic(timeInterval , numberOfSamples);
+    return 1;
 
-    return (0);
 } /* main() */
