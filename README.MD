@@ -4,7 +4,7 @@
 
 1. Discover the devices interfaces
 2. Discover what devices they are connected to ( at the IP level)
-3. Monitor the traffic on the device interfaces
+3. Monitor the traffic on the device interfaces 
 
 ### Input
 - Time Interval Between samples
