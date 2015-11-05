@@ -42,9 +42,9 @@ void snmpcommand(char* oid,int cmd) {
       exit(1);
     }
     pdu = snmp_pdu_create(cmd);
-     if ( cmd == SNMP_MSG_GETBULK) {
+     if ( cmd == SNMP_MSG_GETBULK) { // for bulkget only
     pdu->non_repeaters  = 0;
-    pdu->max_repetitions  = 10;
+    pdu->max_repetitions  = 50;
  }
     anOID_len = MAX_OID_LEN;
    get_node(oid, anOID, &anOID_len);
@@ -93,12 +93,13 @@ char* parseIP(char* temp) {
 }
 struct interfaces monitor;// the interface to monitor
 // Show agents current interface that has an ip
+// MIB OID used: ipAdEntAddr
 void showInteferfaces() {
   int monitor_index = 0; // this records the last interfaces that should be monitored
  struct interfaces ifs[10];
  char *oid ="ipAdEntAddr" ;
  int counter = 0 ;
- snmpbulkget(oid);
+ snmpbulkget(oid); // bulkget
  printf("-------------------------Interfaces-------------------------\n");
  printf("Number --> IP\n");
   if (status == STAT_SUCCESS && response->errstat == SNMP_ERR_NOERROR) {
@@ -151,6 +152,7 @@ void showInteferfaces() {
   printf("\n\n");
 }
 // Show agent's nieghbor and Ips
+// mib object used : ipNetToMediaIfIndex , ipNetToMediaNetAddress
 void showNeighbor() {
   char ifIndex_oid[50] = "ipNetToMediaIfIndex";
   char ip_oid[50] = "ipNetToMediaNetAddress";
@@ -197,16 +199,17 @@ int max(int a , int b) {
 }
 /**
  Calculate the current traffic and display the stat based on time interval provided
+ MIB Object used : ifIntOctets, ifOutets
 **/
 void showTraffic(int timeInterval , int numberOfSamples) {
   char *monitorIp = monitor.ipaddress;
   int data[2];
   char ifInOctets[50] ;
   char ifOutOctets[50];
-  char ifSpeed[50];
+  //char ifSpeed[50];
   sprintf(ifInOctets , "%s.%i","ifInOctets",monitor.ifIndex);
   sprintf(ifOutOctets , "%s.%i","ifOutOctets",monitor.ifIndex);
-  sprintf(ifSpeed , "%s.%i","ifSpeed",monitor.ifIndex);
+  //sprintf(ifSpeed , "%s.%i","ifSpeed",monitor.ifIndex);
   printf("Monitoring %s ...\n", monitorIp);
   // initialize the first data "inoctets" and "outoctets"
   snmpget(ifInOctets);
